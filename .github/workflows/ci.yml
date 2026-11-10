@@ -1,3 +1,4 @@
+
 name: CI Pipeline
 
 on:
@@ -34,3 +35,15 @@ jobs:
 
       - name: Run Ruff
         run: ruff check app tests
+
+  docker-build:
+    name: Build Docker Image
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t devops25-cicd-demo:${{ github.sha }} .
