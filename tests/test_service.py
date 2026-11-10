@@ -14,3 +14,7 @@ def test_divide():
 def test_divide_by_zero():
     with pytest.raises(ValueError):
         divide(10, 0)
+
+
+def test_divide_negative_number():
+    assert divide(-10, 2) == -5
