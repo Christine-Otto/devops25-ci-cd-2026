@@ -1,0 +1,40 @@
+
+name: CD - Simulated Deployment
+
+on:
+  push:
+    branches:
+      - demo/dag5
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Build Docker image
+        run: docker build -t devops25-app .
+
+      - name: Start application
+        run: docker run -d --name devops25-app -p 8000:8000 devops25-app
+
+      - name: Verify deployment
+        run: |
+          for i in {1..10}; do
+            if curl --fail --silent http://localhost:8000/health; then
+              echo "Deployment verified successfully"
+              exit 0
+            fi
+            echo "Waiting for application..."
+            sleep 2
+          done
+          echo "Deployment verification failed"
+          docker logs devops25-app
+          exit 1
+
+      - name: Stop application
+        if: always()
+        run: docker rm -f devops25-app || true
