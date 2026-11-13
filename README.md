@@ -184,3 +184,177 @@ Därmed har projektets CI-kedja utökats från automatiserad testning till att o
 **Avgränsning:** Dockerimagen byggdes men publicerades inte till något containerregister. Automatisk deployment och rollback ingick inte i de genomförda övningarna för Lektion 4.
 
 **Status:** Samtliga praktiska moment 4A–4D är genomförda och verifierade.
+
+## Lektion 5 – Continuous Delivery och deployment (12 november 2026)
+
+### Syfte
+
+Under Lektion 5 arbetade jag vidare med FastAPI-applikationen och Dockerimagen från Lektion 4. Syftet var att förstå hur en applikation kan driftsättas och verifieras automatiskt.
+
+Vi arbetade med ett simulerat CD-workflow i GitHub Actions och genomförde även en lokal deployment med Docker och Bash-skript.
+
+Det centrala flödet var:
+
+**Build → Run → Verify → Cleanup**
+
+### Demo 5A – Simulerat CD-workflow i GitHub Actions
+
+Jag skapade filen `.github/workflows/cd-simulated.yml` på branchen `demo/dag5`.
+
+Workflowet heter `CD - Simulated Deployment` och startar automatiskt när kod pushas till branchen. Det innehåller även `workflow_dispatch` för manuell start där GitHub tillåter detta.
+
+Workflowet genomför följande steg:
+
+1. Hämtar repositoryts kod med `actions/checkout@v6`.
+2. Bygger Dockerimagen `devops25-app`.
+3. Startar en container på port 8000.
+4. Kontrollerar applikationens `/health`-endpoint.
+5. Tar bort containern med hjälp av `if: always()`.
+
+Verifieringen försöker ansluta till applikationen upp till tio gånger med två sekunders mellanrum.
+
+Om applikationen inte svarar skrivs containerloggarna ut och jobbet avslutas med ett fel.
+
+Detta är en simulerad deployment eftersom containern endast körs på GitHubs tillfälliga runner. Applikationen publiceras inte som en permanent tjänst i produktion.
+
+Arbetet sparades i Git:
+
+- Branch: `demo/dag5`
+- Commit: `7b39eaa`
+- Commitmeddelande: `Dag 5A: Skapa simulerat CD-workflow`
+
+### Demo 5B – Granska och uppdatera GitHub Actions
+
+Jag granskade CD-workflowets körning och kontrollerade att Dockerimagen byggdes, containern startades och applikationen svarade på `/health`.
+
+Verifieringsloggen visade:
+
+```text
+Waiting for application...
+{"status":"ok"}Deployment verified successfully
+```
+
+Jag kontrollerade också de GitHub Actions-versioner som användes i projektet.
+
+I den befintliga `ci.yml` användes `actions/checkout@v4` på två ställen. Jag uppdaterade dessa till `actions/checkout@v6` enligt lärarens instruktioner.
+
+Den nya CD-filen använde redan version 6.
+
+Ändringen sparades med:
+
+- Commit: `ad361fe`
+- Commitmeddelande: `Dag 5B: Uppdatera checkout till v6`
+
+Efter uppdateringen verifierades både CI Pipeline #12 och CD - Simulated Deployment #2 med status Success.
+
+Under logggranskningen upptäckte jag också en kvarvarande varning om att `actions/setup-python@v5` använder en äldre Node.js-runtime. GitHub visade dessutom informationsmeddelanden om att `ubuntu-latest` migrerar till Ubuntu 26.
+
+Vi noterade dessa meddelanden men gjorde inga ytterligare ändringar, eftersom de inte ingick i laborationens instruktioner.
+
+Detta visade varför det är viktigt att granska loggar och Annotations även när en pipeline har grön status.
+
+### Demo 5C – Lokal deployment med Bash-skript
+
+Jag skapade mappen `scripts` i projektroten med två filer:
+
+- `scripts/deploy_local.sh`
+- `scripts/verify.sh`
+
+`deploy_local.sh` bygger Dockerimagen, tar bort en eventuell tidigare övningscontainer med samma namn och startar applikationen.
+
+`verify.sh` kontrollerar att applikationens `/health`-endpoint svarar korrekt.
+
+Skripten kördes från projektroten med Git Bash:
+
+```bash
+bash scripts/deploy_local.sh
+bash scripts/verify.sh
+```
+
+Det första försöket genomfördes via Windows/WSL:s Bash-miljö. Dockerbygget lyckades, men verifieringen misslyckades.
+
+Jag undersökte därefter Dockercontainern, imagen och vilken Bash-miljö som användes.
+
+När jag i stället körde skripten i Git Bash med Dockerkontexten `desktop-linux` lyckades både deployment och verifiering.
+
+Resultatet blev:
+
+```text
+=== Deployment started ===
+=== Verifying deployment ===
+Waiting for application...
+{"status":"ok"}
+Deployment verified successfully
+```
+
+Detta visade att det är viktigt att kontrollera vilken terminalmiljö och Dockerkontext som används vid felsökning. Den exakta orsaken till det första misslyckandet fastställdes inte.
+
+### Demo 5D – Verifiering av den körande containern
+
+Efter den lokala deploymenten kontrollerade jag containern och applikationen med följande kommandon:
+
+```bash
+docker ps
+docker logs devops25-app
+curl -i http://127.0.0.1:8000/health
+curl "http://127.0.0.1:8000/add?a=2&b=3"
+```
+
+`docker ps` visade att containern kördes.
+
+`docker logs` bekräftade att Uvicorn hade startat och att applikationen var tillgänglig på port 8000.
+
+Hälsokontrollen gav HTTP 200 och:
+
+```json
+{"status":"ok"}
+```
+
+Additionstestet gav:
+
+```json
+{"result":5.0}
+```
+
+När kontrollerna var klara stoppade och tog jag bort containern:
+
+```bash
+docker rm -f devops25-app
+```
+
+Därefter verifierade jag att containern var borttagen men att Dockerimagen `devops25-app:latest` fortfarande fanns kvar.
+
+### Git och slutlig verifiering
+
+De lokala Bash-skripten sparades och pushades till GitHub.
+
+- Branch: `demo/dag5`
+- Commit: `16122a9`
+- Commitmeddelande: `Dag 5C: Lokal deployment och verifiering med skript`
+
+Efter denna push kontrollerade jag GitHub Actions igen.
+
+| Workflow | Körning | Resultat |
+|---|---|---|
+| CI Pipeline | #13 | Success |
+| CD - Simulated Deployment | #3 | Success |
+
+Båda körningarna gällde commit `16122a9`.
+
+CI-pipelinen genomförde både tester och Dockerbygge. CD-workflowet genomförde den simulerade deploymenten.
+
+### Slutsats och reflektion
+
+Under Lektion 5 har jag fått en tydligare förståelse för skillnaden mellan Continuous Integration, Continuous Delivery och deployment.
+
+I Lektion 4 byggde vi en Dockerimage automatiskt efter godkända tester. I Lektion 5 gick vi vidare genom att automatisera start, verifiering och cleanup av applikationen.
+
+Jag har lärt mig att en lyckad Dockerbuild inte automatiskt betyder att applikationen fungerar. En container kan vara startad utan att tjänsten är redo att ta emot anrop.
+
+Därför behöver vi kontrollera både containerstatus, loggar och applikationens faktiska svar.
+
+Jag har också sett hur viktigt det är att granska varningar i GitHub Actions och att inte enbart förlita sig på grön status.
+
+I denna laboration startar CI och CD oberoende av varandra vid push. Det innebär att CD inte väntar på att CI först ska bli godkänt. I en mer robust leveranskedja skulle beroenden och kvalitetskontroller behöva hanteras tydligare.
+
+**Status:** Samtliga praktiska moment 5A–5D är genomförda och verifierade. Applikationen har körts och verifierats både i GitHub Actions och lokalt med Docker. Ingen permanent produktionsdeployment har genomförts.
