@@ -358,3 +358,390 @@ Jag har också sett hur viktigt det är att granska varningar i GitHub Actions o
 I denna laboration startar CI och CD oberoende av varandra vid push. Det innebär att CD inte väntar på att CI först ska bli godkänt. I en mer robust leveranskedja skulle beroenden och kvalitetskontroller behöva hanteras tydligare.
 
 **Status:** Samtliga praktiska moment 5A–5D är genomförda och verifierade. Applikationen har körts och verifierats både i GitHub Actions och lokalt med Docker. Ingen permanent produktionsdeployment har genomförts.
+
+## Lektion 6 – Continuous Delivery, rollback och hela ändringsresan (13 november 2026)
+
+### Syfte
+
+Under Lektion 6 arbetade jag vidare med FastAPI-applikationen och Dockerprojektet från tidigare lektioner.
+
+Syftet var att förstå hur en applikation kan driftsättas, verifieras, versionshanteras och återställas om något går fel.
+
+Jag arbetade även med hela CI/CD-processen, från kodändring och automatiska tester till Pull Request, merge och simulerad deployment i GitHub Actions.
+
+De viktigaste momenten var:
+
+- Felsökning av Dockercontainrar och portkonflikter.
+- Versionshantering av Dockerimages.
+- Rollback till en tidigare fungerande version.
+- Utveckling och testning av en ny API-endpoint.
+- Pull Request och merge mellan Git-branches.
+- Automatisk CI och simulerad CD i GitHub Actions.
+- Kontroll av applikationens version efter deployment.
+
+### Demo 6A – Felsökning av portkonflikt
+
+Jag började med att starta FastAPI-applikationen i Docker på port 8000.
+
+```bash
+docker run -d --name devops25-app -p 8000:8000 devops25-app:latest
+```
+
+Jag kontrollerade att containern kördes och att applikationens health-endpoint fungerade.
+
+```bash
+docker ps
+curl http://localhost:8000/health
+```
+
+Applikationen svarade:
+
+```json
+{"status":"ok"}
+```
+
+Därefter försökte jag starta ytterligare en container, `devops25-fel`, med samma port 8000.
+
+Detta misslyckades eftersom porten redan användes av den första containern.
+
+Docker rapporterade:
+
+```text
+Bind for 0.0.0.0:8000 failed: port is already allocated
+```
+
+Jag undersökte problemet med `docker ps -a` och identifierade den befintliga portbindningen.
+
+Jag löste problemet genom att ta bort den misslyckade containern och starta den nya containern på värdport 8001.
+
+```bash
+docker rm -f devops25-fel
+
+docker run -d --name devops25-fel -p 8001:8000 devops25-app:latest
+```
+
+Jag verifierade sedan båda applikationerna:
+
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8001/health
+```
+
+Båda returnerade `{"status":"ok"}`.
+
+Efter testet tog jag bort den extra containern.
+
+**Lärdom:** Två containrar kan använda samma interna port, men de kan inte samtidigt använda samma värdport och nätverksadress.
+
+### Demo 6B – Versionshantering och rollback
+
+I nästa moment arbetade jag med två versioner av samma Dockerimage.
+
+Jag skapade först en versionstagg för den fungerande imagen:
+
+```bash
+docker tag devops25-app:latest devops25-app:v1
+```
+
+Därefter byggde jag en ny version:
+
+```bash
+docker build -t devops25-app:v2 .
+```
+
+Jag kontrollerade att båda versionerna fanns tillgängliga med:
+
+```bash
+docker images devops25-app
+```
+
+Jag stoppade och tog bort den tidigare containern och startade version 2.
+
+```bash
+docker rm -f devops25-app
+docker run -d --name devops25-app -p 8000:8000 devops25-app:v2
+```
+
+Jag verifierade deploymenten med:
+
+```bash
+bash scripts/verify.sh
+```
+
+Skriptet kontrollerade applikationens `/health`-endpoint och bekräftade att applikationen fungerade.
+
+#### Rollback till version 1
+
+För att simulera en återställning skapade jag skriptet:
+
+`scripts/rollback_local.sh`
+
+Skriptet genomför följande:
+
+1. Kontrollerar att Dockerimagen `devops25-app:v1` finns.
+2. Stoppar och tar bort den befintliga containern.
+3. Startar en ny container från version 1.
+4. Kör `scripts/verify.sh`.
+5. Visar vilken Dockerimage containern använder.
+
+Jag körde skriptet med:
+
+```bash
+bash scripts/rollback_local.sh
+```
+
+Terminalen bekräftade:
+
+```text
+Deployment verified successfully
+devops25-app:v1
+=== Rollback completed ===
+```
+
+**Resultat:** Rollback till version 1 lyckades och applikationen fungerade efter återställningen.
+
+**Lärdom:** Rollback gör det möjligt att återgå till en tidigare fungerande applikationsversion om en ny deployment orsakar problem.
+
+### Demo 6C – Hela ändringsresan genom CI/CD
+
+I detta moment arbetade jag med en separat branch:
+
+`demo/dag6-full-pipeline`
+
+Jag använde branchen för att utveckla en ny funktion utan att direkt ändra målbranchen `demo/dag6`.
+
+#### Steg 1 – Ny version-endpoint
+
+Jag uppdaterade `app/main.py` med en endpoint som returnerar applikationens version och miljö.
+
+```python
+@app.get("/version")
+def version():
+    return {
+        "version": "1.1",
+        "environment": "demo",
+    }
+```
+
+Endpointen gör det möjligt att kontrollera vilken applikationsversion som faktiskt körs efter en deployment.
+
+#### Steg 2 – Automatiskt test
+
+Jag lade till ett test i `tests/test_api.py`.
+
+```python
+def test_version():
+    response = client.get("/version")
+    assert response.status_code == 200
+    assert response.json() == {
+        "version": "1.1",
+        "environment": "demo",
+    }
+```
+
+Jag körde tester och kodkontroll lokalt:
+
+```bash
+python -m pytest -v
+python -m ruff check .
+```
+
+Resultatet blev:
+
+```text
+7 passed, 1 warning
+All checks passed!
+```
+
+Varningen gällde en föråldrad användning av `httpx` i testmiljön och hindrade inte testerna från att godkännas.
+
+#### Steg 3 – Commit och push
+
+Jag sparade kodändringarna med Git.
+
+Commit:
+
+`da7a73f` – Dag 6C: Lägg till version-endpoint och test
+
+Ändringarna pushades till GitHub och startade CI Pipeline #17.
+
+GitHub Actions genomförde automatiskt:
+
+- Test and Lint.
+- Build Docker Image.
+
+Båda jobben godkändes.
+
+#### Steg 4 – Pull Request
+
+Jag skapade Pull Request #2 med titeln:
+
+**Dag 6C: Lägg till version-endpoint och test**
+
+Pull Requesten jämförde:
+
+- Base: `demo/dag6`
+- Compare: `demo/dag6-full-pipeline`
+
+Jag dokumenterade ändringarnas syfte, genomförande, verifiering och avgränsning.
+
+GitHub visade att båda CI-kontrollerna var godkända och att inga merge-konflikter fanns.
+
+Pull Requesten mergades sedan till `demo/dag6`.
+
+Pull Request:
+
+https://github.com/Christine-Otto/devops25-ci-cd-2026/pull/2
+
+#### Steg 5 – CI efter merge
+
+Efter merge synkroniserade jag min lokala branch.
+
+```bash
+git switch demo/dag6
+git pull --ff-only origin demo/dag6
+git status
+```
+
+Merge-commit:
+
+`527d1a1`
+
+GitHub Actions startade CI Pipeline #18 för målbranchen.
+
+Resultat:
+
+| Jobb | Status |
+|---|---|
+| Test and Lint | Success |
+| Build Docker Image | Success |
+| Hela CI Pipeline #18 | Success |
+
+Total körtid: 30 sekunder.
+
+Det bekräftade att den sammanfogade koden passerade CI-kontrollerna.
+
+CI-körning:
+
+https://github.com/Christine-Otto/devops25-ci-cd-2026/actions/runs/43416826183
+
+### Simulerad CD med versionskontroll
+
+För att komplettera CI-processen uppdaterade jag GitHub Actions-workflowet:
+
+`.github/workflows/cd-simulated.yml`
+
+Jag behöll triggern för `demo/dag5` och lade även till `demo/dag6`.
+
+```yaml
+on:
+  push:
+    branches:
+      - demo/dag5
+      - demo/dag6
+  workflow_dispatch:
+```
+
+Därefter lade jag till ett nytt steg, `Verify application version`, som anropar `/version` och kontrollerar att applikationen returnerar rätt värden.
+
+Kontrollen verifierar:
+
+- Version: `1.1`
+- Environment: `demo`
+
+Om något värde är fel misslyckas versionskontrollen.
+
+Det befintliga cleanup-steget med `if: always()` behölls för att stoppa och ta bort testcontainern även om ett tidigare steg misslyckas.
+
+#### Kontroll av YAML-filen
+
+Jag installerade PyYAML i min lokala virtuella Pythonmiljö och använde biblioteket för att kontrollera att workflowfilen kunde läsas.
+
+Resultat:
+
+```text
+YAML syntax OK
+```
+
+Jag körde även:
+
+```bash
+git diff --check
+git status
+```
+
+Kontrollerna visade inga formateringsfel och endast den avsedda workflowfilen var ändrad.
+
+#### Commit och push av CD-workflow
+
+Jag skapade följande commit:
+
+`2a38dd1` – Dag 6C: Lägg till versionskontroll i CD
+
+När ändringen pushades till `demo/dag6` startade både CI och CD automatiskt.
+
+Resultatet blev:
+
+| Workflow | Körning | Status |
+|---|---|---|
+| CI Pipeline | #19 | Success |
+| CD - Simulated Deployment | #5 | Success |
+
+### Slutlig verifiering av deployment
+
+I GitHub Actions granskade jag loggarna för `CD - Simulated Deployment #5`.
+
+Workflowet genomförde:
+
+1. Checkout repository.
+2. Build Docker image.
+3. Start application.
+4. Verify deployment.
+5. Verify application version.
+6. Stop application.
+
+Samtliga steg godkändes.
+
+Versionskontrollen visade:
+
+```text
+Deployed version: {'version': '1.1', 'environment': 'demo'}
+Version verification successful
+```
+
+Detta bekräftade att applikationen startades och att rätt version kördes.
+
+Även cleanup-steget `Stop application` slutfördes.
+
+Total körtid för CD-körningen var cirka 30 sekunder.
+
+Godkänd CD-körning:
+
+https://github.com/Christine-Otto/devops25-ci-cd-2026/actions/runs/43418338644
+
+### Viktiga lärdomar från Lektion 6
+
+- En portkonflikt uppstår när flera containrar försöker använda samma värdport.
+- Dockerimages kan versionshanteras med taggar som `v1` och `v2`.
+- Rollback gör det möjligt att återställa en tidigare fungerande version.
+- En health check verifierar att applikationen svarar, men inte nödvändigtvis att rätt version körs.
+- En versionsendpoint gör det möjligt att verifiera vilken version som faktiskt är driftsatt.
+- Pull Requests gör att kodändringar kan granskas och testas före merge.
+- CI kontrollerar automatiskt kodkvalitet, tester och byggprocessen.
+- CD kan automatisera bygg, start, verifiering och cleanup.
+- En grön GitHub Actions-körning ska alltid kompletteras med granskning av loggar.
+- En lyckad simulerad deployment är inte samma sak som en permanent produktionsdeployment.
+
+### Slutsats
+
+Under Lektion 6 genomförde jag felsökning av Dockercontainrar, versionshantering, rollback och en komplett kodändringsprocess genom Git och GitHub Actions.
+
+Jag skapade en version-endpoint, lade till automatiska tester, arbetade med en separat Git-branch, skapade en Pull Request och mergade ändringen efter godkända CI-kontroller.
+
+Jag uppdaterade även CD-workflowet för att kontrollera applikationens version efter deployment.
+
+Den slutliga körningen verifierade att version `1.1` kördes i miljön `demo` och att testcontainern togs bort efteråt.
+
+**Avgränsning:** Laborationen använde lokala Dockercontainrar och simulerad deployment i GitHub Actions. Ingen permanent produktionsdeployment eller automatisk produktionsrollback genomfördes.
+
+**Status:** Samtliga praktiska moment i Demo 6A, 6B och 6C är genomförda och verifierade.
