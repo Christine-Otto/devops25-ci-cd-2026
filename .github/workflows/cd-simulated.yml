@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - demo/dag5
+      - demo/dag6
   workflow_dispatch:
 
 jobs:
@@ -34,6 +35,25 @@ jobs:
           echo "Deployment verification failed"
           docker logs devops25-app
           exit 1
+
+      - name: Verify application version
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          url = "http://localhost:8000/version"
+
+          with urllib.request.urlopen(url, timeout=10) as response:
+              data = json.load(response)
+
+          print("Deployed version:", data)
+
+          assert data["version"] == "1.1", "Incorrect application version"
+          assert data["environment"] == "demo", "Incorrect environment"
+
+          print("Version verification successful")
+          PY
 
       - name: Stop application
         if: always()
